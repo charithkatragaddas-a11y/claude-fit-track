@@ -17,9 +17,10 @@ class ReportTab:
 
     # Sets up the tab. 'parent' is the CTk frame provided by the tab view
     # and 'db' is the shared Database instance used to fetch workout records.
-    def __init__(self, parent, db: Database):
+    def __init__(self, parent, db: Database, user_id: int):
         self.parent = parent
         self.db = db
+        self.user_id = user_id
         self._build()
 
     # Creates the month/year selector dropdowns, the colour legend, and the
@@ -74,7 +75,7 @@ class ReportTab:
         start = f"{year}-{month_idx:02d}-01"
         end   = f"{year}-{month_idx:02d}-{last_day:02d}"
 
-        rows = self.db.get_workouts_range(start, end)
+        rows = self.db.get_workouts_range(start, end, self.user_id)
 
         # Build a running total of volume per muscle.
         # Primary muscles receive the full volume; secondary muscles get half,

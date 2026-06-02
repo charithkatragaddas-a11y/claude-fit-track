@@ -14,9 +14,10 @@ class HistoryTab:
 
     # Sets up the tab. 'parent' is the CTk frame provided by the tab view
     # and 'db' is the shared Database instance used to fetch workout records.
-    def __init__(self, parent, db: Database):
+    def __init__(self, parent, db: Database, user_id: int):
         self.parent = parent
         self.db = db
+        self.user_id = user_id
         self._build()
 
     # Creates all the widgets for the History tab: the filter bar, the column
@@ -55,15 +56,14 @@ class HistoryTab:
         filt = self.history_filter.get()
 
         if filt == "This Week":
-            # timedelta subtracts days to get back to Monday of the current week
             start = today - timedelta(days=today.weekday())
-            rows = self.db.get_workouts_range(start.isoformat(), today.isoformat())
+            rows = self.db.get_workouts_range(start.isoformat(), today.isoformat(), self.user_id)
         elif filt == "This Month":
             rows = self.db.get_workouts_range(
-                today.replace(day=1).isoformat(), today.isoformat()
+                today.replace(day=1).isoformat(), today.isoformat(), self.user_id
             )
         else:
-            rows = self.db.get_all_workouts()
+            rows = self.db.get_all_workouts(self.user_id)
 
         if not rows:
             ctk.CTkLabel(self.scroll, text="No workouts found",

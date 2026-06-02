@@ -4,23 +4,20 @@ from pathlib import Path
 DB_PATH = Path(__file__).parent / "fittrack.db"
 
 
-# Handles all reading and writing to the SQLite database file (fittrack.db).
-# Every method on this class is either a "write" (inserting or deleting rows)
-# or a "read" (fetching rows back out). No UI code lives here — it is purely
-# data access.
 class Database:
 
-    # Opens (or creates) the database file and makes sure the required
-    # tables exist before any other method is called.
     def __init__(self):
         self.conn = sqlite3.connect(str(DB_PATH))
         self._create_tables()
+        self._migrate()
 
-    # Creates the database tables if they do not already exist.
-    # The legacy 'workouts' table is kept so older database files still
-    # open without errors, but the app only writes to 'workout_sets'.
-    # 'workout_sets' stores one row for every individual set the user logs.
     def _create_tables(self):
+        self.conn.execute("""
+            CREATE TABLE IF NOT EXISTS users (
+                id       INTEGER PRIMARY KEY AUTOINCREMENT,
+                username TEXT    NOT NULL UNIQUE
+            )
+        """)
         self.conn.execute("""
             CREATE TABLE IF NOT EXISTS workouts (
                 id       INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -34,6 +31,7 @@ class Database:
         self.conn.execute("""
             CREATE TABLE IF NOT EXISTS workout_sets (
                 id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id    INTEGER NOT NULL DEFAULT 1,
                 date       TEXT    NOT NULL,
                 exercise   TEXT    NOT NULL,
                 set_number INTEGER NOT NULL,
@@ -42,30 +40,49 @@ class Database:
         """)
         self.conn.commit()
 
+    def _migrate(self):
+        # For existing databases that pre-date the multi-user feature:
+        # add the user_id column and assign all legacy rows to a 'default' user.
+        cols = [row[1] for row in self.conn.execute("PRAGMA table_info(workout_sets)").fetchall()]
+        if "user_id" not in cols:
+            self.conn.execute("INSERT OR IGNORE INTO users (id, username) VALUES (1, 'default')")
+            self.conn.execute("ALTER TABLE workout_sets ADD COLUMN user_id INTEGER NOT NULL DEFAULT 1")
+            self.conn.commit()
+
+    # ------------------------------------------------------------------ #
+    #  User management                                                     #
+    # ------------------------------------------------------------------ #
+
+    def get_user(self, username: str):
+        return self.conn.execute(
+            "SELECT id, username FROM users WHERE username = ?", (username,)
+        ).fetchone()
+
+    def create_user(self, username: str) -> int:
+        cursor = self.conn.execute(
+            "INSERT INTO users (username) VALUES (?)", (username,)
+        )
+        self.conn.commit()
+        return cursor.lastrowid
+
     # ------------------------------------------------------------------ #
     #  Writes                                                              #
     # ------------------------------------------------------------------ #
 
-    # Saves a full workout session to the database. 'exercises' is a list
-    # of dictionaries, each with an 'exercise' name and a 'sets' list of
-    # rep counts — e.g. [{'exercise': 'Bench Press', 'sets': [6, 8, 7]}].
-    # Each rep count becomes its own row in workout_sets.
-    def log_session(self, date: str, exercises: list) -> None:
+    def log_session(self, date: str, exercises: list, user_id: int) -> None:
         for ex_data in exercises:
             for set_num, reps in enumerate(ex_data["sets"], start=1):
                 self.conn.execute(
-                    "INSERT INTO workout_sets (date, exercise, set_number, reps) "
-                    "VALUES (?, ?, ?, ?)",
-                    (date, ex_data["exercise"], set_num, reps),
+                    "INSERT INTO workout_sets (user_id, date, exercise, set_number, reps) "
+                    "VALUES (?, ?, ?, ?, ?)",
+                    (user_id, date, ex_data["exercise"], set_num, reps),
                 )
         self.conn.commit()
 
-    # Deletes every set logged for a specific exercise on a specific date.
-    # Used when the user clicks the Delete button in the "Logged Today" panel.
-    def delete_exercise_sets(self, date: str, exercise: str) -> None:
+    def delete_exercise_sets(self, date: str, exercise: str, user_id: int) -> None:
         self.conn.execute(
-            "DELETE FROM workout_sets WHERE date = ? AND exercise = ?",
-            (date, exercise),
+            "DELETE FROM workout_sets WHERE user_id = ? AND date = ? AND exercise = ?",
+            (user_id, date, exercise),
         )
         self.conn.commit()
 
@@ -73,37 +90,29 @@ class Database:
     #  Reads                                                               #
     # ------------------------------------------------------------------ #
 
-    # Returns a summary of every exercise logged on a given date.
-    # Each item in the result is (exercise, num_sets, total_reps).
-    # 'total_reps' is the volume — the sum of all individual set rep counts.
-    def get_today_summary(self, date: str):
+    def get_today_summary(self, date: str, user_id: int):
         return self.conn.execute("""
             SELECT exercise, COUNT(*) AS num_sets, SUM(reps) AS total_reps
             FROM workout_sets
-            WHERE date = ?
+            WHERE user_id = ? AND date = ?
             GROUP BY exercise
             ORDER BY exercise
-        """, (date,)).fetchall()
+        """, (user_id, date)).fetchall()
 
-    # Returns all exercises logged between two dates (inclusive).
-    # Each item is (date, exercise, num_sets, total_reps), grouped so that
-    # multiple sets of the same exercise on the same day appear as one row.
-    # Used by the History and Monthly Report tabs.
-    def get_workouts_range(self, start: str, end: str):
+    def get_workouts_range(self, start: str, end: str, user_id: int):
         return self.conn.execute("""
             SELECT date, exercise, COUNT(*) AS num_sets, SUM(reps) AS total_reps
             FROM workout_sets
-            WHERE date >= ? AND date <= ?
+            WHERE user_id = ? AND date >= ? AND date <= ?
             GROUP BY date, exercise
             ORDER BY date DESC, exercise
-        """, (start, end)).fetchall()
+        """, (user_id, start, end)).fetchall()
 
-    # Same format as get_workouts_range but returns every row ever logged,
-    # with no date filter. Used by the History tab's "All Time" view.
-    def get_all_workouts(self):
+    def get_all_workouts(self, user_id: int):
         return self.conn.execute("""
             SELECT date, exercise, COUNT(*) AS num_sets, SUM(reps) AS total_reps
             FROM workout_sets
+            WHERE user_id = ?
             GROUP BY date, exercise
             ORDER BY date DESC, exercise
-        """).fetchall()
+        """, (user_id,)).fetchall()

@@ -18,9 +18,10 @@ class LogTab:
     # 'db' is the Database instance shared across all tabs, and 'on_change'
     # is a callback function that gets called after any workout is saved or
     # deleted so the History and Report tabs can refresh themselves.
-    def __init__(self, parent, db: Database, on_change):
+    def __init__(self, parent, db: Database, user_id: int, on_change):
         self.parent = parent
         self.db = db
+        self.user_id = user_id
         self.on_change = on_change
         self._exercises_sorted = sorted(EXERCISES.keys())
         # _session holds the exercises the user is currently building.
@@ -338,7 +339,7 @@ class LogTab:
                     return
             exercises_data.append({"exercise": exercise, "sets": reps_list})
 
-        self.db.log_session(date.today().isoformat(), exercises_data)
+        self.db.log_session(date.today().isoformat(), exercises_data, self.user_id)
         count = len(exercises_data)
         self._flash_status(
             f"Logged {count} exercise{'s' if count != 1 else ''}!", "#4CAF50"
@@ -368,7 +369,7 @@ class LogTab:
     # logging a session or deleting an exercise.
     def _refresh_today_summary(self):
         clear_frame(self.today_scroll)
-        rows = self.db.get_today_summary(date.today().isoformat())
+        rows = self.db.get_today_summary(date.today().isoformat(), self.user_id)
         if not rows:
             ctk.CTkLabel(
                 self.today_scroll, text="Nothing logged today yet",
@@ -409,6 +410,6 @@ class LogTab:
     # Deletes all sets for the given exercise from today's database records,
     # redraws the "Logged Today" panel, and notifies the other tabs to refresh.
     def _delete_today_exercise(self, exercise: str):
-        self.db.delete_exercise_sets(date.today().isoformat(), exercise)
+        self.db.delete_exercise_sets(date.today().isoformat(), exercise, self.user_id)
         self._refresh_today_summary()
         self.on_change()

@@ -4,6 +4,41 @@ A Python desktop app for logging workouts, tracking volume per muscle group, and
 
 ---
 
+## Tech Stack
+
+| Layer | Library / Tool |
+|---|---|
+| GUI | `customtkinter` (dark mode, blue theme) + `tkinter` Listbox |
+| Database | SQLite via Python's built-in `sqlite3` |
+| Data file | `fittrack.db` — auto-created next to the scripts on first run |
+
+---
+
+## Entry Point
+
+Run `main.py`. A `LoginWindow` opens first and blocks until the user logs in or signs up. On success, `user_id` and `username` are passed into `FitTrackApp` which builds the three-tab interface.
+
+---
+
+## Login Flow (`login.py` — `LoginWindow`)
+
+- Fixed 420×320 window, centered on screen at launch.
+- **Log In** — looks up the username in `users`; shows a red error if not found.
+- **Sign Up** — creates a new `users` row; shows an orange error if the username is already taken.
+- Enter key is bound to the login action.
+- Feedback appears inline via `msg_label` (no popup dialogs).
+- On success sets `self.user_id` / `self.username` and calls `self.destroy()`, returning control to `main.py`.
+
+---
+
+## Multi-user Support
+
+Every database read and write is scoped by `user_id`. The id is obtained at login and threaded through `FitTrackApp` → each tab constructor and every DB call. No global session state is used.
+
+**Migration:** on the first run against an old single-user database, `db._migrate()` adds the `user_id` column to `workout_sets` and assigns all existing rows to a `'default'` user (id = 1).
+
+---
+
 ## Architecture
 
 ```mermaid
@@ -108,16 +143,22 @@ Thresholds are derived from a target training profile:
 
 ```mermaid
 erDiagram
+    USERS {
+        INTEGER id PK
+        TEXT    username
+    }
     WORKOUT_SETS {
         INTEGER id PK
+        INTEGER user_id FK
         TEXT    date
         TEXT    exercise
         INTEGER set_number
         INTEGER reps
     }
+    USERS ||--o{ WORKOUT_SETS : "owns"
 ```
 
-Each individual set is its own row. Volume for an exercise = `SUM(reps)` across all its sets. History and report queries use `GROUP BY date, exercise` to aggregate.
+Each individual set is its own row. Volume for an exercise = `SUM(reps)` across all its sets. History and report queries use `GROUP BY date, exercise` to aggregate. All queries are scoped to the logged-in `user_id`.
 
 ---
 
@@ -126,6 +167,7 @@ Each individual set is its own row. Volume for an exercise = `SUM(reps)` across 
 | File | Purpose |
 |---|---|
 | [main.py](main.py) | App shell — `FitTrackApp`, tab wiring, `_on_workout_change` callback |
+| [login.py](login.py) | `LoginWindow` — username login / sign-up dialog shown before the main app |
 | [config.py](config.py) | Volume thresholds, `STATUS_COLORS`, `muscle_status()` |
 | [ui_helpers.py](ui_helpers.py) | Shared UI utilities: `make_table_header`, `clear_frame` |
 | [db.py](db.py) | `Database` class — SQLite CRUD wrapper |
@@ -174,14 +216,21 @@ Two reusable drawing functions shared by multiple tabs.
 `clear_frame` loops through every widget inside a frame and destroys it. Called before any list redraws itself — wipe the slate clean, then draw fresh.
 
 ### `db.py`
-The only file that talks to the database. Opens (or creates) `fittrack.db` using Python's built-in `sqlite3`. Every logged set gets its own row in `workout_sets` with four columns: date, exercise name, set number, and reps.
+The only file that talks to the database. Opens (or creates) `fittrack.db` using Python's built-in `sqlite3`. Two tables: `users` (id + username) and `workout_sets` (one row per individual set: user_id, date, exercise name, set number, reps).
+
+On first run against an old single-user database, `_migrate` adds the `user_id` column to `workout_sets` and assigns all existing rows to a `'default'` user.
+
+User methods: `get_user` (returns a row by username or None) and `create_user` (inserts a new user and returns the new id).
 
 Write methods: `log_session` (inserts one row per set) and `delete_exercise_sets` (wipes every set for one exercise on one date).
 
-Read methods: `get_today_summary` (groups today's sets into one row per exercise, summing reps), `get_workouts_range` (same grouping between two dates), `get_all_workouts` (same with no date filter).
+Read methods: `get_today_summary` (groups today's sets into one row per exercise, summing reps), `get_workouts_range` (same grouping between two dates), `get_all_workouts` (same with no date filter). All read/write methods accept a `user_id` to scope results.
+
+### `login.py`
+The first window the user sees. `LoginWindow` is a fixed-size CustomTkinter window centered on screen. It has a single username entry field and two buttons: **Log In** (looks up the username — errors if not found) and **Sign Up** (creates a new user row — errors if the username is taken). The Enter key is bound to the login action. Feedback appears inline in a `msg_label` label rather than a popup dialog. On success it stores `user_id` and `username` on itself and calls `self.destroy()` so `main.py` can read those values and launch the main window.
 
 ### `main.py`
-The entry point. `FitTrackApp` creates one `Database` instance shared by all three tabs, builds the tab bar, and passes `_on_workout_change` as a callback into `LogTab`. That callback keeps the other tabs in sync — whenever LogTab saves or deletes something, it calls this function, which tells History and Report to refresh.
+The entry point. Launches `LoginWindow` first; if the user closes it without logging in, the app exits. Otherwise `FitTrackApp` creates one `Database` instance shared by all three tabs, builds the tab bar, and passes `_on_workout_change` as a callback into `LogTab`. That callback keeps the other tabs in sync — whenever LogTab saves or deletes something, it calls this function, which tells History and Report to refresh.
 
 ### `tabs/log_tab.py`
 The most complex file. Split into four sections:
@@ -204,6 +253,15 @@ Read-only display tab. `_build` creates three radio buttons (This Week / This Mo
 
 ## Class / Function / Method Reference
 
+**login.py**
+- `LoginWindow` (class) — the login/sign-up dialog shown before the main app opens
+- `__init__` — creates the window and calls `_build`; sets `user_id` and `username` to None until login succeeds
+- `_center` — repositions the window to the center of the screen after layout is finalized
+- `_build` — creates the username entry, Log In / Sign Up buttons, and the inline feedback label
+- `_login` — looks up the username; sets `user_id`/`username` and destroys the window on success
+- `_signup` — creates a new user row; sets `user_id`/`username` and destroys the window on success
+- `_show_msg` — updates the inline feedback label with a message and color
+
 **main.py**
 - `FitTrackApp` (class) — the main app window; owns the tab bar and connects all three tabs
 - `__init__` — runs on startup; creates the window, database, and all three tabs; wires the refresh callback
@@ -218,12 +276,15 @@ Read-only display tab. `_build` creates three radio buttons (This Week / This Mo
 
 **db.py**
 - `Database` (class) — handles all reading and writing to the SQLite database; no UI code here
-- `__init__` — opens (or creates) fittrack.db and runs `_create_tables`
-- `_create_tables` — creates the `workout_sets` table if it doesn't exist yet
+- `__init__` — opens (or creates) fittrack.db and runs `_create_tables` then `_migrate`
+- `_create_tables` — creates the `users` and `workout_sets` tables if they don't exist yet
+- `_migrate` — adds `user_id` to `workout_sets` on old single-user databases and assigns existing rows to `'default'`
+- `get_user` — returns the (id, username) row for a username, or None if not found
+- `create_user` — inserts a new user and returns the new id
 - `log_session` — inserts one database row per individual set logged
 - `delete_exercise_sets` — deletes every set for a specific exercise on a specific date
-- `get_today_summary` — returns (exercise, num_sets, total_reps) for every exercise logged today
-- `get_workouts_range` — returns (date, exercise, num_sets, total_reps) between two dates; used by History and Report
+- `get_today_summary` — returns (exercise, num_sets, total_reps) for every exercise logged today by the given user
+- `get_workouts_range` — returns (date, exercise, num_sets, total_reps) between two dates for the given user
 - `get_all_workouts` — same format but no date filter; used by History's "All Time" view
 
 **tabs/log_tab.py**

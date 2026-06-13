@@ -78,6 +78,7 @@ class LoginWindow(ctk.CTk):
         if not username:
             self._show_msg("Please enter a username.", "#F44336")
             return
+        username = username.upper()
         user = self.db.get_user(username)
         if user is None:
             self._show_msg("Username not found. Use Sign Up to create an account.", "#F44336")
@@ -91,6 +92,7 @@ class LoginWindow(ctk.CTk):
         if not username:
             self._show_msg("Please enter a username.", "#F44336")
             return
+        username = username.upper()
         if self.db.get_user(username):
             self._show_msg("Username already taken. Try logging in instead.", "#FF9800")
             return

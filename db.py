@@ -18,16 +18,7 @@ class Database:
                 username TEXT    NOT NULL UNIQUE
             )
         """)
-        self.conn.execute("""
-            CREATE TABLE IF NOT EXISTS workouts (
-                id       INTEGER PRIMARY KEY AUTOINCREMENT,
-                date     TEXT    NOT NULL,
-                exercise TEXT    NOT NULL,
-                sets     INTEGER NOT NULL,
-                reps     INTEGER NOT NULL,
-                volume   INTEGER NOT NULL
-            )
-        """)
+        
         self.conn.execute("""
             CREATE TABLE IF NOT EXISTS workout_sets (
                 id         INTEGER PRIMARY KEY AUTOINCREMENT,

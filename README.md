@@ -149,7 +149,17 @@ To adjust the thresholds, edit [config.py](config.py).
 
 ---
 
-## How to Run
+## Set Up From Scratch for Windows Enviroment
+```bash
+1. Download VsCode .exe file (Make sure to click add to path)
+2. Download Python .exe file (Make sure to click add to path)
+3. Create workplace
+4. Login to github on IDE
+5. Obtain Url and paste it into command pallete, Git:Clone
+
+```
+
+## How to Run App from Terminal
 
 ```bash
 pip install customtkinter
